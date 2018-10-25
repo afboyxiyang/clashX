@@ -40,13 +40,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     let ssQueue = DispatchQueue(label: "com.w2fzu.ssqueue", attributes: .concurrent)
     var statusItemView:StatusItemView!
     
-    var isRunning = false
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
-        failLaunchProtect()
-        _ = ProxyConfigManager.install()
-        PFMoveToApplicationsFolderIfNecessary()
         
+        failLaunchProtect()
+        
+        _ = ProxyConfigManager.install()
+        ConfigFileFactory.upgardeIniIfNeed()
+        ConfigFileFactory.copySampleConfigIfNeed()
+        
+        PFMoveToApplicationsFolderIfNecessary()
+
         statusItemView = StatusItemView.create(statusItem: nil,statusMenu: statusMenu)
         statusItemView.onPopUpMenuAction = {
             [weak self] in
@@ -133,6 +137,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
         }.disposed(by: disposeBag)
         
+        ConfigManager
+            .shared
+            .isRunningVariable
+            .asObservable()
+            .distinctUntilChanged()
+            .bind { [unowned self] _ in
+                self.updateProxyList()
+        }.disposed(by: disposeBag)
+        
         LaunchAtLogin.shared
             .isEnableVirable
             .asObservable()
@@ -159,7 +172,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             //发生连续崩溃
             ConfigFileFactory.backupAndRemoveConfigFile()
             try? FileManager.default.removeItem(atPath: kConfigFolderPath + "Country.mmdb")
-            NSUserNotificationCenter.default.post(title: "Fail on launch protect", info: "You origin Config has been rename to config.ini.bak")
+            NSUserNotificationCenter.default.post(title: "Fail on launch protect", info: "You origin Config has been renamed")
         }
         DispatchQueue.global().asyncAfter(deadline: DispatchTime.now() + Double(Int64(1 * Double(NSEC_PER_SEC))) / Double(NSEC_PER_SEC), execute: {
             x.set(0, forKey: "launch_fail_times")
@@ -190,7 +203,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     func updateProxyList() {
-        ProxyMenuItemFactory.menuItems { [unowned self] (menus) in
+        func updateProxyList(withMenus menus:[NSMenuItem]) {
             let startIndex = self.statusMenu.items.index(of: self.separatorLineTop)!+1
             let endIndex = self.statusMenu.items.index(of: self.sepatatorLineEndProxySelect)!
             var items = self.statusMenu.items
@@ -206,6 +219,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.statusMenu.insertItem(each, at: 0)
             }
         }
+        
+        if ConfigManager.shared.isRunning {
+            ProxyMenuItemFactory.menuItems { (menus) in
+                updateProxyList(withMenus: menus)
+            }
+            
+        } else {
+            updateProxyList(withMenus: [])
+        }
+        
+        
     }
     
     func updateLoggingLevel() {
@@ -216,16 +240,14 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     
     func startProxy() {
-        if self.isRunning {return}
-        
-        self.isRunning = true
         print("Trying start proxy")
         if let cstring = run() {
-//            self.isRunning = false
             let error = String(cString: cstring)
             if (error != "success") {
+                ConfigManager.shared.isRunning = false
                 NSUserNotificationCenter.default.postConfigErrorNotice(msg:error)
             } else {
+                ConfigManager.shared.isRunning = true
                 self.resetStreamApi()
                 self.selectOutBoundModeWithMenory()
                 self.selectAllowLanWithMenory()
@@ -300,23 +322,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         LaunchAtLogin.shared.isEnabled = !LaunchAtLogin.shared.isEnabled
     }
     
-    var genConfigWindow:NSWindowController?=nil
-    @IBAction func actionGenConfig(_ sender: Any) {
-        let ctrl = PreferencesWindowController(windowNibName: "PreferencesWindowController")
-        
-        
-        genConfigWindow?.close()
-        genConfigWindow=ctrl
-        ctrl.window?.title = ctrl.contentViewController?.title ?? ""
-        ctrl.showWindow(nil)
-        NSApp.activate(ignoringOtherApps: true)
-        ctrl.window?.makeKeyAndOrderFront(self)
-
-    }
     
     @IBAction func openConfigFolder(_ sender: Any) {
-        let path = (NSHomeDirectory() as NSString).appendingPathComponent("/.config/clash")
-        NSWorkspace.shared.openFile(path)
+        NSWorkspace.shared.openFile(kConfigFolderPath)
     }
     
     @IBAction func actionUpdateConfig(_ sender: Any) {

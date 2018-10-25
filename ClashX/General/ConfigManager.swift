@@ -9,14 +9,17 @@
 import Foundation
 import Cocoa
 import RxSwift
+import Yams
 
 class ConfigManager {
     
     static let shared = ConfigManager()
     private let disposeBag = DisposeBag()
     var apiPort = "8080"
+    var apiSecret:String? = nil
+
     private init(){
-        refreshApiPort()
+        refreshApiInfo()
         setupNetworkNotifier()
     }
     
@@ -30,6 +33,18 @@ class ConfigManager {
         }
     }
     var currentConfigVariable = Variable<ClashConfig?>(nil)
+    
+    var isRunning:Bool{
+        get {
+            return isRunningVariable.value
+        }
+        
+        set {
+            isRunningVariable.value = newValue
+        }
+    }
+    
+    var isRunningVariable = Variable<Bool>(false)
     
     var proxyPortAutoSet:Bool {
         get{
@@ -56,6 +71,7 @@ class ConfigManager {
             return "http://127.0.0.1:\(shared.apiPort)"
         }
     }
+    
     
     static var selectedProxyMap:[String:String] {
         get{
@@ -94,21 +110,21 @@ class ConfigManager {
         }
     }
     
-    func refreshApiPort(){
-        if let ini =
-            parseConfig("\(NSHomeDirectory())/.config/clash/config.ini"),
-            let controller = ini["General"]?["external-controller"]{
-            if controller.contains(":") {
-                if let port = controller.split(separator: ":").last {
-                    apiPort = String(port)
-                    return;
-                }
+    func refreshApiInfo(){
+        apiPort = "7892"
+        apiSecret = nil;
+        if let yamlStr = try? String(contentsOfFile: kConfigFilePath),
+            var yaml = (try? Yams.load(yaml: yamlStr)) as? [String:Any] {
+            if let controller = yaml["external-controller"] as? String,
+                let port = controller.split(separator: ":").last{
+                apiPort = String(port)
+            } else {
+                yaml["external-controller"] = apiPort
+                ConfigFileFactory.saveToClashConfigFile(config: yaml)
             }
-        }
-        if (ConfigFileFactory.copySimpleConfigFile()) {
-            refreshApiPort()
+            apiSecret = yaml["secret"] as? String
         } else {
-            apiPort = "7892"
+            _ = ConfigFileFactory.replaceConfigWithSampleConfig()
         }
     }
     
