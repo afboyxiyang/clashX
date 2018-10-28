@@ -44,6 +44,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         signal(SIGPIPE, SIG_IGN)
         
         failLaunchProtect()
+        registCrashLogger()
         
         _ = ProxyConfigManager.install()
         ConfigFileFactory.upgardeIniIfNeed()
@@ -61,6 +62,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         setupDashboard()
         startProxy()
         updateLoggingLevel()
+        ConfigFileFactory.checkFinalRuleAndShowAlert()
     }
 
 
@@ -160,6 +162,16 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         if (!ClashWebViewContoller.enableDashBoard()) {
             statusMenu.removeItem(dashboardMenuItem)
         }
+    }
+    
+    func registCrashLogger() {
+        func exceptionHandler(exception : NSException) {
+            print(exception)
+            print(exception.callStackSymbols)
+            let str = exception.callStackSymbols.joined(separator: "\n")
+            Logger.log(msg: str, level: .error)
+        }
+        NSSetUncaughtExceptionHandler(exceptionHandler)
     }
     
     func failLaunchProtect(){
@@ -334,6 +346,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.resetStreamApi()
                 self.selectProxyGroupWithMemory()
                 self.selectOutBoundModeWithMenory()
+                ConfigFileFactory.checkFinalRuleAndShowAlert()
                 NSUserNotificationCenter
                     .default
                     .post(title: "Reload Config Succeed", info: "succees")
