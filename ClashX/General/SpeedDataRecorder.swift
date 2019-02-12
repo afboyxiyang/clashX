@@ -12,5 +12,21 @@ class SpeedDataRecorder {
     static let shared = SpeedDataRecorder()
     private init(){}
     
-    var speedDict = [String:Int]()
+    private let queue = DispatchQueue(label: "clashx.SpeedDataRecorder", qos: .default, attributes: .concurrent)
+    private var speedDict = [String:Int]()
+    
+    func getDelay(_ proxyName:String) -> Int? {
+        var delay:Int?
+        queue.sync { [weak self] in
+            delay = self?.speedDict[proxyName]
+        }
+        return delay
+    }
+    
+    func setDelay(_ proxyName:String,delay:Int?) {
+        queue.async(qos: .default, flags: .barrier) {
+            [weak self] in
+            self?.speedDict[proxyName] = delay
+        }
+    }
 }

@@ -12,6 +12,9 @@ import Alamofire
 import RxCocoa
 import RxSwift
 
+import Fabric
+import Crashlytics
+
 @NSApplicationMain
 class AppDelegate: NSObject, NSApplicationDelegate {
     var statusItem: NSStatusItem!
@@ -30,6 +33,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @IBOutlet weak var dashboardMenuItem: NSMenuItem!
     @IBOutlet weak var separatorLineTop: NSMenuItem!
     @IBOutlet weak var sepatatorLineEndProxySelect: NSMenuItem!
+    @IBOutlet weak var switchConfigMenuItem: NSMenuItem!
     
     @IBOutlet weak var logLevelMenuItem: NSMenuItem!
     @IBOutlet weak var httpPortMenuItem: NSMenuItem!
@@ -37,38 +41,45 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @IBOutlet weak var apiPortMenuItem: NSMenuItem!
     
     var disposeBag = DisposeBag()
-    let ssQueue = DispatchQueue(label: "com.w2fzu.ssqueue", attributes: .concurrent)
     var statusItemView:StatusItemView!
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
         
-        failLaunchProtect()
-        registCrashLogger()
-        
-        _ = ProxyConfigManager.install()
-        ConfigFileFactory.upgardeIniIfNeed()
-        ConfigFileFactory.copySampleConfigIfNeed()
-        
-        PFMoveToApplicationsFolderIfNecessary()
+        // setup menu item first
         statusItem = NSStatusBar.system.statusItem(withLength:65)
         statusItem.menu = statusMenu
-
+        
         statusItemView = StatusItemView.create(statusItem: statusItem)
         statusMenu.delegate = self
         
+        // crash recorder
+        failLaunchProtect()
+        registCrashLogger()
+        
+        // install proxy helper
+        _ = ProxyConfigHelperManager.install()
+        ConfigFileManager.copySampleConfigIfNeed()
+        ConfigManager.shared.refreshApiInfo()
+        
+        PFMoveToApplicationsFolderIfNecessary()
+        
+        // start proxy
         setupData()
-        setupDashboard()
-        startProxy()
+        actionUpdateConfig(self)
         updateLoggingLevel()
-        ConfigFileFactory.checkFinalRuleAndShowAlert()
+        hideFunctionIfNeed()
+        
+        // check config vaild via api
+        ConfigFileManager.checkFinalRuleAndShowAlert()
+        
     }
 
 
 
     func applicationWillTerminate(_ aNotification: Notification) {
         if ConfigManager.shared.proxyPortAutoSet {
-            _ = ProxyConfigManager.setUpSystemProxy(port: nil,socksPort: nil)
+            _ = ProxyConfigHelperManager.setUpSystemProxy(port: nil,socksPort: nil)
         }
     }
 
@@ -76,18 +87,21 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // check and refresh api url
         _ = ConfigManager.apiUrl
+        
         // start watch config file change
-        ConfigFileFactory.shared.watchConfigFile()
+        ConfigFileManager.shared.watchConfigFile(configName: ConfigManager.selectConfigName)
         
         NotificationCenter.default.rx.notification(kShouldUpDateConfig).bind {
-            [unowned self] (note)  in
-            self.actionUpdateConfig(self)
+            [weak self] (note)  in
+            guard let self = self else {return}
+            self.actionUpdateConfig(nil)
         }.disposed(by: disposeBag)
         
         
         ConfigManager.shared
             .showNetSpeedIndicatorObservable
-            .bind {[unowned self] (show) in
+            .bind {[weak self] (show) in
+                guard let self = self else {return}
                 self.showNetSpeedIndicatorMenuItem.state = (show ?? true) ? .on : .off
                 let statusItemLength:CGFloat = (show ?? true) ? 65 : 25
                 self.statusItem.length = statusItemLength
@@ -99,8 +113,9 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         ConfigManager.shared
             .proxyPortAutoSetObservable
             .distinctUntilChanged()
-            .bind{ [unowned self]
+            .bind{ [weak self]
                 en in
+                guard let self = self else {return}
                 let enable = en ?? false
                 self.proxySettingMenuItem.state = enable ? .on : .off
             }.disposed(by: disposeBag)
@@ -110,27 +125,28 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .asObservable()
         Observable.zip(configObservable,configObservable.skip(1))
             .filter{(_, new) in return new != nil}
-            .bind {[unowned self] (old,config) in
+            .bind {[weak self] (old,config) in
+                guard let self = self,let config=config else {return}
                 self.proxyModeDirectMenuItem.state = .off
                 self.proxyModeGlobalMenuItem.state = .off
                 self.proxyModeRuleMenuItem.state = .off
                 
-                switch config!.mode {
+                switch config.mode {
                 case .direct:self.proxyModeDirectMenuItem.state = .on
                 case .global:self.proxyModeGlobalMenuItem.state = .on
                 case .rule:self.proxyModeRuleMenuItem.state = .on
                 }
-                self.allowFromLanMenuItem.state = config!.allowLan ? .on : .off
-                self.proxyModeMenuItem.title = "\("Proxy Mode".localized()) (\(config!.mode.rawValue.localized()))"
+                self.allowFromLanMenuItem.state = config.allowLan ? .on : .off
+                self.proxyModeMenuItem.title = "\("Proxy Mode".localized()) (\(config.mode.rawValue.localized()))"
                 
                 self.updateProxyList()
                 
-                if (old?.port != config?.port && ConfigManager.shared.proxyPortAutoSet) {
-                    _ = ProxyConfigManager.setUpSystemProxy(port: config!.port,socksPort: config!.socketPort)
+                if (old?.port != config.port && ConfigManager.shared.proxyPortAutoSet) {
+                    _ = ProxyConfigHelperManager.setUpSystemProxy(port: config.port,socksPort: config.socketPort)
                 }
                 
-                self.httpPortMenuItem.title  = "Http Port:\(config?.port ?? 0)"
-                self.socksPortMenuItem.title = "Socks Port:\(config?.socketPort ?? 0)"
+                self.httpPortMenuItem.title  = "Http Port:\(config.port)"
+                self.socksPortMenuItem.title = "Socks Port:\(config.socketPort)"
                 self.apiPortMenuItem.title = "Api Port:\(ConfigManager.shared.apiPort)"
 
         }.disposed(by: disposeBag)
@@ -140,7 +156,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             .isRunningVariable
             .asObservable()
             .distinctUntilChanged()
-            .bind { [unowned self] _ in
+            .bind { [weak self] _ in
+                guard let self = self else {return}
                 self.updateProxyList()
         }.disposed(by: disposeBag)
         
@@ -154,61 +171,15 @@ class AppDelegate: NSObject, NSApplicationDelegate {
   
     }
     
-    func setupDashboard() {
-        if (!ClashWebViewContoller.enableDashBoard()) {
-            statusMenu.removeItem(dashboardMenuItem)
+    func hideFunctionIfNeed() {
+        if #available(OSX 10.11, *) {
+            // pass
+        } else {
+            dashboardMenuItem.isHidden = true
         }
     }
-    
-    func registCrashLogger() {
-        func exceptionHandler(exception : NSException) {
-            print(exception)
-            print(exception.callStackSymbols)
-            let str = exception.callStackSymbols.joined(separator: "\n")
-            Logger.log(msg: str, level: .error)
-        }
-        NSSetUncaughtExceptionHandler(exceptionHandler)
-    }
-    
-    func failLaunchProtect(){
-        let x = UserDefaults.standard
-        var launch_fail_times:Int = 0
-        if let xx = x.object(forKey: "launch_fail_times") as? Int {launch_fail_times = xx }
-        launch_fail_times += 1
-        x.set(launch_fail_times, forKey: "launch_fail_times")
-        if launch_fail_times > 2 {
-            //发生连续崩溃
-            ConfigFileFactory.backupAndRemoveConfigFile()
-            try? FileManager.default.removeItem(atPath: kConfigFolderPath + "Country.mmdb")
-            NSUserNotificationCenter.default.post(title: "Fail on launch protect", info: "You origin Config has been renamed")
-        }
-        DispatchQueue.global().asyncAfter(deadline: DispatchTime.now() + Double(Int64(1 * Double(NSEC_PER_SEC))) / Double(NSEC_PER_SEC), execute: {
-            x.set(0, forKey: "launch_fail_times")
-        });
-    }
-    
-    func selectProxyGroupWithMemory(){
-        for item in ConfigManager.selectedProxyMap {
-            ApiRequest.updateProxyGroup(group: item.key, selectProxy: item.value) { (success) in
-                if (!success) {
-                    ConfigManager.selectedProxyMap[item.key] = nil
-                }
-            }
-        }
-    }
-    
-    func selectOutBoundModeWithMenory() {
-        ApiRequest.updateOutBoundMode(mode: ConfigManager.selectOutBoundMode){
-            _ in
-            self.syncConfig()
-        }
-    }
-    
-    func selectAllowLanWithMenory() {
-        ApiRequest.updateAllowLan(allow: ConfigManager.allowConnectFromLan){
-            self.syncConfig()
-        }
-    }
+
+
     
     func updateProxyList() {
         func updateProxyList(withMenus menus:[NSMenuItem]) {
@@ -229,15 +200,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
         
         if ConfigManager.shared.isRunning {
-            ProxyMenuItemFactory.menuItems { (menus) in
+            MenuItemFactory.menuItems { (menus) in
                 updateProxyList(withMenus: menus)
             }
             
         } else {
             updateProxyList(withMenus: [])
         }
-        
-        
+    }
+    
+    func updateConfigFiles() {
+        switchConfigMenuItem.submenu = MenuItemFactory.generateSwitchConfigSubMenu()
     }
     
     func updateLoggingLevel() {
@@ -248,6 +221,18 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     
     
     func startProxy() {
+        if (ConfigManager.shared.isRunning){return}
+    
+        // setup ui config first
+        if let htmlPath = Bundle.main.path(forResource: "index", ofType: "html", inDirectory: "dashboard") {
+            let uiPath = URL(fileURLWithPath: htmlPath).deletingLastPathComponent().path
+            let path = String(uiPath)
+            let length = path.count + 1
+            let buffer = UnsafeMutablePointer<Int8>.allocate(capacity: length)
+            (path as NSString).getCString(buffer, maxLength: length, encoding: String.Encoding.utf8.rawValue)
+            setUIPath(buffer)
+        }
+        
         print("Trying start proxy")
         if let cstring = run() {
             let error = String(cString: cstring)
@@ -257,11 +242,11 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             } else {
                 ConfigManager.shared.isRunning = true
                 self.resetStreamApi()
-                self.selectOutBoundModeWithMenory()
-                self.selectAllowLanWithMenory()
-                self.selectProxyGroupWithMemory()
+                self.dashboardMenuItem.isEnabled = true
             }
         }
+        
+        
 
     }
     
@@ -285,43 +270,17 @@ class AppDelegate: NSObject, NSApplicationDelegate {
             Logger.log(msg: msg,level: ClashLogLevel(rawValue: type) ?? .unknow)
         }
     }
+    
+}
 
-    
-//Actions:
-    
-    @IBAction func actionQuit(_ sender: Any) {
-        NSApplication.shared.terminate(self)
-    }
-        
-    @IBAction func actionSetSystemProxy(_ sender: Any) {
-        ConfigManager.shared.proxyPortAutoSet = !ConfigManager.shared.proxyPortAutoSet
-        if ConfigManager.shared.proxyPortAutoSet {
-            let port = ConfigManager.shared.currentConfig?.port ?? 0
-            let socketPort = ConfigManager.shared.currentConfig?.socketPort ?? 0
-            _ = ProxyConfigManager.setUpSystemProxy(port: port,socksPort:socketPort)
-        } else {
-            _ = ProxyConfigManager.setUpSystemProxy(port: nil,socksPort: nil)
-        }
+// MARK: Main actions
 
-    }
-    
-    @IBAction func actionCopyExportCommand(_ sender: Any) {
-        let pasteboard = NSPasteboard.general
-        pasteboard.clearContents()
-        let port = ConfigManager.shared.currentConfig?.port ?? 0
-        let socksport = ConfigManager.shared.currentConfig?.socketPort ?? 0
-        pasteboard.setString("export https_proxy=http://127.0.0.1:\(port);export http_proxy=http://127.0.0.1:\(port);export all_proxy=socks5://127.0.0.1:\(socksport)", forType: .string)        
-    }
-    
-    @IBAction func actionSpeedTest(_ sender: Any) {
-        
-    
-    }
-    
+extension AppDelegate {
     
     @IBAction func actionAllowFromLan(_ sender: NSMenuItem) {
         ApiRequest.updateAllowLan(allow: !ConfigManager.allowConnectFromLan) {
-            [unowned self] in
+            [weak self] in
+            guard let self = self else {return}
             self.syncConfig()
             ConfigManager.allowConnectFromLan = !ConfigManager.allowConnectFromLan
         }
@@ -333,40 +292,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     }
     
     
-    @IBAction func openConfigFolder(_ sender: Any) {
-        NSWorkspace.shared.openFile(kConfigFolderPath)
-    }
-    
-    @IBAction func actionUpdateConfig(_ sender: Any) {
-        ApiRequest.requestConfigUpdate() { [unowned self] error in
-            if (error == nil) {
-                self.syncConfig()
-                self.resetStreamApi()
-                self.selectProxyGroupWithMemory()
-                self.selectOutBoundModeWithMenory()
-                ConfigFileFactory.checkFinalRuleAndShowAlert()
-                NSUserNotificationCenter
-                    .default
-                    .post(title: "Reload Config Succeed", info: "succees")
-            } else {
-                NSUserNotificationCenter
-                    .default
-                    .post(title: "Reload Config Fail", info: error ?? "")
-            }
-            
-        }
-    }
-    
-    @IBAction func actionSetLogLevel(_ sender: NSMenuItem) {
-        let level = ClashLogLevel(rawValue: sender.title.lowercased()) ?? .unknow
-        ConfigManager.selectLoggingApiLevel = level
-        updateLoggingLevel()
-        resetStreamApi()
-    }
-    
-    @IBAction func actionImportBunchJsonFile(_ sender: NSMenuItem) {
-        ConfigFileFactory.importConfigFile()
-    }
     @IBAction func actionSwitchProxyMode(_ sender: NSMenuItem) {
         let mode:ClashProxyMode
         switch sender {
@@ -387,45 +312,167 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         }
     }
     
-    @IBAction func actionImportConfigFromSSURL(_ sender: NSMenuItem) {
-        let pasteBoard = NSPasteboard.general.string(forType: NSPasteboard.PasteboardType.string)
-        if let proxyModel = ProxyServerModel(urlStr: pasteBoard ?? "") {
-            ConfigFileFactory.addProxyToConfig(proxy: proxyModel)
-        } else {
-            NSUserNotificationCenter.default.postImportConfigFromUrlFailNotice(urlStr: pasteBoard ?? "empty")
-        }
-    }
-    
-    @IBAction func actionScanQRCode(_ sender: NSMenuItem) {
-        if let urls = QRCodeUtil.ScanQRCodeOnScreen() {
-            for url in urls {
-                if let proxyModel = ProxyServerModel(urlStr: url) {
-                    ConfigFileFactory.addProxyToConfig(proxy: proxyModel)
-                } else {
-                    NSUserNotificationCenter
-                        .default
-                        .postImportConfigFromUrlFailNotice(urlStr: url)
-                }
-            }
-        }else {
-            NSUserNotificationCenter.default.postQRCodeNotFoundNotice()
-        }
-    }
     
     @IBAction func actionShowNetSpeedIndicator(_ sender: NSMenuItem) {
         ConfigManager.shared.showNetSpeedIndicator = !(sender.state == .on)
     }
     
+    @IBAction func actionSetSystemProxy(_ sender: Any) {
+        ConfigManager.shared.proxyPortAutoSet = !ConfigManager.shared.proxyPortAutoSet
+        if ConfigManager.shared.proxyPortAutoSet {
+            let port = ConfigManager.shared.currentConfig?.port ?? 0
+            let socketPort = ConfigManager.shared.currentConfig?.socketPort ?? 0
+            _ = ProxyConfigHelperManager.setUpSystemProxy(port: port,socksPort:socketPort)
+        } else {
+            _ = ProxyConfigHelperManager.setUpSystemProxy(port: nil,socksPort: nil)
+        }
+        
+    }
+    
+    @IBAction func actionCopyExportCommand(_ sender: Any) {
+        let pasteboard = NSPasteboard.general
+        pasteboard.clearContents()
+        let port = ConfigManager.shared.currentConfig?.port ?? 0
+        let socksport = ConfigManager.shared.currentConfig?.socketPort ?? 0
+        pasteboard.setString("export https_proxy=http://127.0.0.1:\(port);export http_proxy=http://127.0.0.1:\(port);export all_proxy=socks5://127.0.0.1:\(socksport)", forType: .string)
+    }
+    
+    @IBAction func actionSpeedTest(_ sender: Any) {
+        
+        
+    }
+    
+    @IBAction func actionQuit(_ sender: Any) {
+        NSApplication.shared.terminate(self)
+    }
+}
+
+// MARK: Help actions
+extension AppDelegate {
     @IBAction func actionShowLog(_ sender: Any) {
         NSWorkspace.shared.openFile(Logger.shared.logFilePath())
+    }
 
+}
+
+// MARK: Config actions
+
+extension AppDelegate {
+    
+    @IBAction func openConfigFolder(_ sender: Any) {
+        NSWorkspace.shared.openFile(kConfigFolderPath)
+    }
+    
+    @IBAction func actionUpdateConfig(_ sender: Any?) {
+        startProxy()
+        guard ConfigManager.shared.isRunning else {return}
+        let notifaction = self != (sender as? NSObject)
+        ApiRequest.requestConfigUpdate() { [weak self] error in
+            guard let self = self else {return}
+            if (error == nil) {
+                self.syncConfig()
+                self.resetStreamApi()
+                self.selectProxyGroupWithMemory()
+                self.selectOutBoundModeWithMenory()
+                self.selectAllowLanWithMenory()
+                ConfigFileManager.checkFinalRuleAndShowAlert()
+                if notifaction{
+                    NSUserNotificationCenter
+                        .default
+                        .post(title: "Reload Config Succeed", info: "Succees")
+                }
+            } else {
+                if (notifaction) {
+                    NSUserNotificationCenter
+                        .default
+                        .post(title: "Reload Config Fail", info: error ?? "")
+                }
+            }
+            
+        }
+    }
+    
+    @IBAction func actionSetLogLevel(_ sender: NSMenuItem) {
+        let level = ClashLogLevel(rawValue: sender.title.lowercased()) ?? .unknow
+        ConfigManager.selectLoggingApiLevel = level
+        updateLoggingLevel()
+        resetStreamApi()
+    }
+    
+
+    
+    
+    @IBAction func actionSetRemoteConfigUrl(_ sender: Any) {
+        RemoteConfigManager.showUrlInputAlert()
+    }
+    
+    
+    @IBAction func actionUpdateRemoteConfig(_ sender: Any) {
+        RemoteConfigManager.updateConfigIfNeed()
+    }
+}
+
+// MARK: crash hanlder
+extension AppDelegate {
+    func registCrashLogger() {
+        Fabric.with([Crashlytics.self])
+    }
+    
+    func failLaunchProtect(){
+        let x = UserDefaults.standard
+        var launch_fail_times:Int = 0
+        if let xx = x.object(forKey: "launch_fail_times") as? Int {launch_fail_times = xx }
+        launch_fail_times += 1
+        x.set(launch_fail_times, forKey: "launch_fail_times")
+        if launch_fail_times > 3 {
+            //发生连续崩溃
+            ConfigFileManager.backupAndRemoveConfigFile()
+            try? FileManager.default.removeItem(atPath: kConfigFolderPath + "Country.mmdb")
+            NSUserNotificationCenter.default.post(title: "Fail on launch protect", info: "You origin Config has been renamed")
+        }
+        DispatchQueue.global().asyncAfter(deadline: DispatchTime.now() + Double(Int64(1 * Double(NSEC_PER_SEC))) / Double(NSEC_PER_SEC), execute: {
+            x.set(0, forKey: "launch_fail_times")
+        });
     }
     
 }
 
+// MARK: Memory
+extension AppDelegate {
+    
+    func selectProxyGroupWithMemory(){
+        for item in ConfigManager.selectedProxyMap {
+            ApiRequest.updateProxyGroup(group: item.key, selectProxy: item.value) { (success) in
+                if (!success) {
+                    ConfigManager.selectedProxyMap[item.key] = nil
+                }
+            }
+        }
+    }
+    
+    func selectOutBoundModeWithMenory() {
+        ApiRequest.updateOutBoundMode(mode: ConfigManager.selectOutBoundMode){
+            _ in
+            self.syncConfig()
+        }
+    }
+    
+    func selectAllowLanWithMenory() {
+        ApiRequest.updateAllowLan(allow: ConfigManager.allowConnectFromLan){
+            self.syncConfig()
+        }
+    }
+}
+
+// MARK: NSMenuDelegate
 extension AppDelegate:NSMenuDelegate {
     func menuWillOpen(_ menu: NSMenu) {
-        self.syncConfig()
     }
+    
+    func menuNeedsUpdate(_ menu: NSMenu) {
+        syncConfig()
+        updateConfigFiles()
+    }
+
 }
 

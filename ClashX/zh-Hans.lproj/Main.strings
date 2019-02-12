@@ -20,6 +20,15 @@
 /* Class = "NSMenuItem"; title = "Rule"; ObjectID = "89n-bD-JHk"; */
 "89n-bD-JHk.title" = "规则判断";
 
+/* Class = "NSMenuItem"; title = "Remote config"; ObjectID = "h1C-R6-Y9w"; */
+"h1C-R6-Y9w.title" = "托管配置";
+
+/* Class = "NSMenuItem"; title = "Set url"; ObjectID = "k1Z-jQ-kAy"; */
+"k1Z-jQ-kAy.title" = "设置地址";
+
+/* Class = "NSMenuItem"; title = "Update"; ObjectID = "I2P-Wd-Ns7"; */
+"I2P-Wd-Ns7.title" = "更新";
+
 /* Class = "NSMenuItem"; title = "Set as system proxy"; ObjectID = "8se-yr-wmp"; */
 "8se-yr-wmp.title" = "设置为系统代理";
 
@@ -99,7 +108,7 @@
 "WQk-kX-Jr8.headerCell.title" = "代理";
 
 /* Class = "NSMenuItem"; title = "Dashboard (dev)"; ObjectID = "XG6-2M-PNi"; */
-"XG6-2M-PNi.title" = "Dashboard (dev)";
+"XG6-2M-PNi.title" = "控制台";
 
 /* Class = "NSMenuItem"; title = "DEBUG"; ObjectID = "XIR-Go-fWA"; */
 "XIR-Go-fWA.title" = "DEBUG";
@@ -160,3 +169,6 @@
 
 /* Class = "NSMenuItem"; title = "Global"; ObjectID = "yiM-U4-MNg"; */
 "yiM-U4-MNg.title" = "全局连接";
+
+/* Class = "NSMenu"; title = "Log level"; ObjectID = "dcz-b4-hVy"; */
+"jdX-Cx-5pe.title" = "切换配置文件";

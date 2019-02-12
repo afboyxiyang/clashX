@@ -8,28 +8,38 @@
 
 A rule based proxy For Mac base on [Clash](https://github.com/Dreamacro/clash).
 
-### <b>Star and Support the upstream [Clash](https://github.com/Dreamacro/clash) , Thank You!</b>
-
-Telegram Group: [Join](https://t.me/clash_discuss)
-
-# Features
-
-HTTP/HTTPS and SOCKS proxy
-Surge like configuration
-GeoIP rule support
 
 
+## Features
 
-# Install
+- HTTP/HTTPS and SOCKS protocol
+- Surge like configuration
+- GeoIP rule support
+- Support Vmess/Shadowsocks/Socks5
+- Support for Netfilter TCP redirect
+
+
+## Install
 
 You can download from [release](https://github.com/yichengchen/clashX/releases) page
 
+## Build
+- Download mmdb from http://geolite.maxmind.com/download/geoip/database/GeoLite2-Country.tar.gz unzip and put it in the "ClashX/Support Files/Country.mmdb".
 
-# Config
-You can use config generator in Status Bar Menu "Config" section.
-Config support most of surge rules.
+- Open the "ClashX/Resources" folder and clone the dashboard project.
+  ```
+  git clone -b gh-pages git@github.com:Dreamacro/clash-dashboard.git dashboard
+  ```
 
-ClashX has upgrade to using .yml formate config file, Checking [Github for Clash](https://github.com/Dreamacro/clash) or [SS-Rule-Snippet for Clash](https://github.com/Hackl0us/SS-Rule-Snippet/blob/master/LAZY_RULES/clash.yml) for more detail
+- Build and run.
 
-Configuration file at $HOME/.config/clash/config.yml
+## Config
+
+
+The default configuration directory is `$HOME/.config/clash`
+
+The default name of the configuration file is `config.yml`. You can use your custom config name and switch config in menu "Config" section.
+
+Checking [Github for Clash](https://github.com/Dreamacro/clash) or [SS-Rule-Snippet for Clash](https://github.com/Hackl0us/SS-Rule-Snippet/blob/master/LAZY_RULES/clash.yml) for more detail.
+
 

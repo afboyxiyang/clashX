@@ -22,7 +22,7 @@ class Logger {
     
     private func logToFile(msg:String,level:ClashLogLevel) {
         switch level {
-        case .debug:
+        case .debug,.silent:
             DDLogDebug(msg)
         case .error:
             DDLogError(msg)
@@ -36,7 +36,9 @@ class Logger {
     }
     
     static func log(msg:String ,level:ClashLogLevel = .unknow) {
-        shared.logToFile(msg: "[\(level.rawValue)] \(msg)", level: level)
+        DispatchQueue.global().async {
+            shared.logToFile(msg: "[\(level.rawValue)] \(msg)", level: level)
+        }
     }
     
     func logFilePath() -> String {
