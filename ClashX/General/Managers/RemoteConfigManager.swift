@@ -21,6 +21,29 @@ class RemoteConfigManager: NSObject {
         }
     }
     
+    static var configFileName:String? {
+        guard let configUrl = configUrl else {return nil}
+        return URL(string: configUrl)?.host
+    }
+    
+    static var lastAutoCheckTime:Date? {
+        get {
+            return UserDefaults.standard.object(forKey: "kLastAutoCheckTime") as? Date
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "kLastAutoCheckTime")
+        }
+    }
+    
+    static var autoUpdateEnable:Bool {
+        get {
+            return UserDefaults.standard.object(forKey: "kAutoUpdateEnable") as? Bool ?? true
+        }
+        set {
+            UserDefaults.standard.set(newValue, forKey: "kAutoUpdateEnable")
+        }
+    }
+    
     static func showUrlInputAlert() {
         let msg = NSAlert()
         msg.addButton(withTitle: "OK")
@@ -35,51 +58,99 @@ class RemoteConfigManager: NSObject {
         let response = msg.runModal()
         
         if response == .alertFirstButtonReturn {
-            if URL(string: txt.stringValue) != nil {
+            if txt.stringValue.count == 0 {
+                configUrl = nil
+                return
+            }
+            
+            if URL(string: txt.stringValue) != nil{
                 configUrl = txt.stringValue
                 updateConfigIfNeed()
-            }else {
+            } else {
                 alert(with: "Url Error")
+            }
+        }
+    }
+    
+    
+    static func updateCheckAtLaunch() {
+        guard autoUpdateEnable else {return}
+        let currentConfig = ConfigManager.selectConfigName
+        
+        if RemoteConfigManager.configUrl != nil, configFileName == currentConfig {
+            
+            if Date().timeIntervalSince(lastAutoCheckTime ?? Date(timeIntervalSince1970: 0)) < 60 * 60 * 12 {
+                // 12hour
+                return;
+            }
+            
+            lastAutoCheckTime = Date()
+            
+            RemoteConfigManager.updateConfigIfNeed { err in
+                if let err = err {
+                    NSUserNotificationCenter.default.post(title: "Remote Config Update Fail", info: err)
+                } else {
+                    NSUserNotificationCenter.default.post(title: "Remote Config Update", info: "Succeed!")
+                }
             }
         }
     }
     
     static func getRemoteConfigString(handler:@escaping (String, String?)->()) {
         guard let urlString = configUrl,
-            let host = URL(string: urlString)?.host
+            let fileName = configFileName
             else {alert(with: "Not config url set!");return}
         
         request(urlString, method: .get).responseString(encoding: .utf8) { (res) in
             if let s = res.result.value {
-                handler(host,s)
+                handler(fileName,s)
             } else {
-                handler(host,nil)
+                handler(fileName,nil)
             }
         }
     }
     
-    static func updateConfigIfNeed() {
-        getRemoteConfigString { (host,string) in
-            guard let newConfigString = string else {alert(with: "Download fail"); return}
+    static func updateConfigIfNeed(complete:((String?)->())?=nil) {
+        getRemoteConfigString { (configName,string) in
+            guard let newConfigString = string else {
+                if let complete = complete {
+                    complete("Download fail")
+                } else {
+                    alert(with: "Download fail")
+                }
+                return
+            }
             
-            let savePath = kConfigFolderPath.appending(host).appending(".yml")
+            let savePath = kConfigFolderPath.appending(configName).appending(".yml")
             let fm = FileManager.default
             do {
                 if fm.fileExists(atPath: savePath) {
                     let current = try String(contentsOfFile: savePath)
                     if current == newConfigString {
-                        self.alert(with: "No Update needed!")
+                        if let complete = complete {
+                            complete(nil)
+                        } else {
+                            self.alert(with: "No Update needed!")
+                        }
+                        return
                     }
                     try fm.removeItem(atPath: savePath)
                 }
                 try newConfigString.write(toFile: savePath, atomically: true, encoding: .utf8)
-                ConfigManager.selectConfigName = host
+                ConfigManager.selectConfigName = configName
                 NotificationCenter.default.post(Notification(name: kShouldUpDateConfig))
-                self.alert(with: "Update Success!")
+                if let complete = complete {
+                    complete(nil)
+                } else {
+                    self.alert(with: "Update Success!")
+                }
             } catch let err {
-                self.alert(with: err.localizedDescription)
+                if let complete = complete {
+                    complete(err.localizedDescription)
+                } else {
+                    self.alert(with: err.localizedDescription)
+                }
             }
-
         }
     }
     

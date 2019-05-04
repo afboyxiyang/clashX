@@ -17,6 +17,7 @@ class ApiRequest{
         let configuration = URLSessionConfiguration.default
         configuration.timeoutIntervalForRequest = 604800
         configuration.timeoutIntervalForResource = 604800
+        configuration.httpMaximumConnectionsPerHost = 50
         alamoFireManager = Alamofire.SessionManager(configuration: configuration)
     }
     
@@ -35,8 +36,9 @@ class ApiRequest{
             guard ConfigManager.shared.isRunning else {
                 return request("")
             }
-
-            return request(ConfigManager.apiUrl + url,
+            
+            return shared.alamoFireManager
+                .request(ConfigManager.apiUrl + url,
                 method: method,
                 parameters: parameters,
                 encoding:encoding,
@@ -51,11 +53,11 @@ class ApiRequest{
     static func requestConfig(completeHandler:@escaping ((ClashConfig)->())){
         req("/configs").responseData{
             res in
-            guard let data = res.result.value else {return}
-            if let config = ClashConfig.fromData(data) {
+            if let data = res.result.value,
+                let config = ClashConfig.fromData(data) {
                 completeHandler(config)
             } else {
-                NSUserNotificationCenter.default.post(title: "Error", info: "Get clash config failed")
+                NSUserNotificationCenter.default.post(title: "Error", info: "Get clash config failed. Try Fix your config file then reload config or restart ClashX")
             }
         }
     }
@@ -91,11 +93,11 @@ class ApiRequest{
         }
     }
     
-    static func requestProxyGroupList(completeHandler:@escaping (([String:[String:Any]])->())){
+    static func requestProxyGroupList(completeHandler:@escaping ((ClashProxyResp)->())){
         req("/proxies").responseJSON{
             res in
-            guard let data = res.result.value as? [String:[String:[String:Any]]] else {return}
-            completeHandler(data["proxies"]!)
+            let proxies = ClashProxyResp(res.result.value)
+            completeHandler(proxies)
         }
     }
     
@@ -120,12 +122,12 @@ class ApiRequest{
         }
     }
     
-    static func getAllProxyList(callback:@escaping (([String])->())) {
-        requestProxyGroupList { (groups) in
-            let lists:[String] = groups["GLOBAL"]?["all"] as? [String] ?? []
-            .filter({
-                ["Shadowsocks","Vmess","Socks5","Http"] .contains(groups[$0]?["type"] as? String ?? "")
-            })
+    static func getAllProxyList(callback:@escaping (([ClashProxyName])->())) {
+        requestProxyGroupList { proxyInfo in
+            let proxyGroupType:[ClashProxyType] = [.urltest,.fallback,.loadBalance,.select,.direct,.reject]
+            let lists:[ClashProxyName] = proxyInfo.proxies
+                .filter{$0.name == "GLOBAL" && proxyGroupType.contains($0.type)}
+                .first?.all ?? []
             callback(lists)
         }
     }
@@ -145,7 +147,7 @@ class ApiRequest{
         req("/rules").responseData { res in
             guard let data = res.result.value else {return}
             let rule = ClashRuleResponse.fromData(data)
-            completeHandler(rule.rules)
+            completeHandler(rule.rules ?? [])
         }
     }
 }
@@ -167,7 +169,7 @@ extension ApiRequest {
                 .stream {(data) in
                     retry = 0
                     if let jsonData = try? JSONSerialization.jsonObject(with: data) as? [String:Int] {
-                        callback(jsonData?["up"] ?? 0, jsonData?["down"] ?? 0)
+                        callback(jsonData["up"] ?? 0, jsonData["down"] ?? 0)
                     }
                 }.response {[weak self] res in
                     guard let err = res.error else {return}
@@ -197,8 +199,8 @@ extension ApiRequest {
                 .stream {(data) in
                     retry = 0
                     if let jsonData = try? JSONSerialization.jsonObject(with: data) as? [String:String] {
-                        let type = jsonData!["type"] ?? "info"
-                        let payload = jsonData!["payload"] ?? ""
+                        let type = jsonData["type"] ?? "info"
+                        let payload = jsonData["payload"] ?? ""
                         callback(type,payload)
                     }
                 }

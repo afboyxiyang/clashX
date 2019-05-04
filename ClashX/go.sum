@@ -1,7 +1,7 @@
-github.com/Dreamacro/clash v0.11.0 h1:dPt3vy/AHg0h2yQvPC1gsa5DWXSHMQ8dIqDuxDNvGQk=
-github.com/Dreamacro/clash v0.11.0/go.mod h1:19rkwUxEptNkWklg0KrRAANBJiEGugNyE8Y2o6Hg/CE=
-github.com/Dreamacro/go-shadowsocks2 v0.1.3-0.20190202135136-da4602d8f112 h1:1axYxE0ZLJy40+ulq46XQt7MaJDJr4iGer1NQz7jmKw=
-github.com/Dreamacro/go-shadowsocks2 v0.1.3-0.20190202135136-da4602d8f112/go.mod h1:giIuN+TuUudTxHc1jjTOyyQYiJ3VXp1pWOHdJbSCAPo=
+github.com/Dreamacro/clash v0.13.1-0.20190425083215-762f2275124d h1:SPn2mIp4ObmToCEcEaeQp/4cGGu15mPtRf7r22G/n4U=
+github.com/Dreamacro/clash v0.13.1-0.20190425083215-762f2275124d/go.mod h1:dCMoulTay5rdWJVOVYt6sX29aostdvMtxkEaZl36lX4=
+github.com/Dreamacro/go-shadowsocks2 v0.1.3-0.20190406142755-9128a199439f h1:nlImrmI6I2AVjJ2AvE3w3f7fi8rhLQAhZO1Gs31+/nE=
+github.com/Dreamacro/go-shadowsocks2 v0.1.3-0.20190406142755-9128a199439f/go.mod h1:giIuN+TuUudTxHc1jjTOyyQYiJ3VXp1pWOHdJbSCAPo=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da h1:KjTM2ks9d14ZYCvmHS9iAKVt9AyzRSqNU1qabPih5BY=
 github.com/aead/chacha20 v0.0.0-20180709150244-8b13a72661da/go.mod h1:eHEWzANqSiWQsof+nXEI9bUVUyV6F53Fp89EuCh2EAA=
 github.com/davecgh/go-spew v1.1.1 h1:vj9j/u1bqnvCEfJOwUhtlOARqs3+rkHYY13jYWTU97c=

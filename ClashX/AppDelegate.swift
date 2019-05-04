@@ -39,9 +39,13 @@ class AppDelegate: NSObject, NSApplicationDelegate {
     @IBOutlet weak var httpPortMenuItem: NSMenuItem!
     @IBOutlet weak var socksPortMenuItem: NSMenuItem!
     @IBOutlet weak var apiPortMenuItem: NSMenuItem!
+    @IBOutlet weak var remoteConfigAutoupdateMenuItem: NSMenuItem!
     
     var disposeBag = DisposeBag()
     var statusItemView:StatusItemView!
+    
+    var isSpeedTesting = false
+
     
     func applicationDidFinishLaunching(_ notification: Notification) {
         signal(SIGPIPE, SIG_IGN)
@@ -51,6 +55,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         statusItem.menu = statusMenu
         
         statusItemView = StatusItemView.create(statusItem: statusItem)
+        statusItemView.frame = CGRect(x: 0, y: 0, width: 65, height: 22)
         statusMenu.delegate = self
         
         // crash recorder
@@ -73,6 +78,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         // check config vaild via api
         ConfigFileManager.checkFinalRuleAndShowAlert()
         
+        RemoteConfigManager.updateCheckAtLaunch()
+        
     }
 
 
@@ -90,6 +97,7 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         
         // start watch config file change
         ConfigFileManager.shared.watchConfigFile(configName: ConfigManager.selectConfigName)
+        remoteConfigAutoupdateMenuItem.state = RemoteConfigManager.autoUpdateEnable ? .on : .off
         
         NotificationCenter.default.rx.notification(kShouldUpDateConfig).bind {
             [weak self] (note)  in
@@ -164,7 +172,8 @@ class AppDelegate: NSObject, NSApplicationDelegate {
         LaunchAtLogin.shared
             .isEnableVirable
             .asObservable()
-            .subscribe(onNext: { (enable) in
+            .subscribe(onNext: { [weak self] enable in
+                guard let self = self else {return}
                 self.autoStartMenuItem.state = enable ? .on : .off
             }).disposed(by: disposeBag)
         
@@ -182,30 +191,30 @@ class AppDelegate: NSObject, NSApplicationDelegate {
 
     
     func updateProxyList() {
-        func updateProxyList(withMenus menus:[NSMenuItem]) {
-            let startIndex = self.statusMenu.items.index(of: self.separatorLineTop)!+1
-            let endIndex = self.statusMenu.items.index(of: self.sepatatorLineEndProxySelect)!
-            var items = self.statusMenu.items
-            
-            self.sepatatorLineEndProxySelect.isHidden = menus.count == 0
-            items.removeSubrange(Range(uncheckedBounds: (lower: startIndex, upper: endIndex)))
-            
-            for each in menus {
-                items.insert(each, at: startIndex)
-            }
-            self.statusMenu.removeAllItems()
-            for each in items.reversed() {
-                self.statusMenu.insertItem(each, at: 0)
-            }
-        }
-        
         if ConfigManager.shared.isRunning {
-            MenuItemFactory.menuItems { (menus) in
-                updateProxyList(withMenus: menus)
+            MenuItemFactory.menuItems {
+                [weak self] menus in
+                self?.updateProxyList(withMenus: menus)
             }
-            
         } else {
             updateProxyList(withMenus: [])
+        }
+    }
+    
+    func updateProxyList(withMenus menus:[NSMenuItem]) {
+        let startIndex = self.statusMenu.items.firstIndex(of: self.separatorLineTop)!+1
+        let endIndex = self.statusMenu.items.firstIndex(of: self.sepatatorLineEndProxySelect)!
+        var items = self.statusMenu.items
+        
+        self.sepatatorLineEndProxySelect.isHidden = menus.count == 0
+        items.removeSubrange(Range(uncheckedBounds: (lower: startIndex, upper: endIndex)))
+        
+        for each in menus {
+            items.insert(each, at: startIndex)
+        }
+        self.statusMenu.removeAllItems()
+        for each in items.reversed() {
+            self.statusMenu.insertItem(each, at: 0)
         }
     }
     
@@ -245,9 +254,6 @@ class AppDelegate: NSObject, NSApplicationDelegate {
                 self.dashboardMenuItem.isEnabled = true
             }
         }
-        
-        
-
     }
     
     func syncConfig(completeHandler:(()->())? = nil){
@@ -338,7 +344,28 @@ extension AppDelegate {
     }
     
     @IBAction func actionSpeedTest(_ sender: Any) {
-        
+        if isSpeedTesting {
+            NSUserNotificationCenter.default.postSpeedTestingNotice()
+            return
+        }
+        NSUserNotificationCenter.default.postSpeedTestBeginNotice()
+
+        isSpeedTesting = true
+        ApiRequest.getAllProxyList { [weak self] proxies in
+            let testGroup = DispatchGroup()
+            
+            for proxyName in proxies {
+                testGroup.enter()
+                ApiRequest.getProxyDelay(proxyName: proxyName) { delay in
+                    testGroup.leave()
+                }
+            }
+            testGroup.notify(queue: DispatchQueue.main, execute: {
+                NSUserNotificationCenter.default.postSpeedTestFinishNotice()
+                self?.isSpeedTesting = false
+            })
+        }
+
         
     }
     
@@ -400,7 +427,10 @@ extension AppDelegate {
     }
     
 
-    
+    @IBAction func actionAutoUpdateRemoteConfig(_ sender: Any) {
+        RemoteConfigManager.autoUpdateEnable = !RemoteConfigManager.autoUpdateEnable
+        remoteConfigAutoupdateMenuItem.state = RemoteConfigManager.autoUpdateEnable ? .on : .off
+    }
     
     @IBAction func actionSetRemoteConfigUrl(_ sender: Any) {
         RemoteConfigManager.showUrlInputAlert()
@@ -452,14 +482,15 @@ extension AppDelegate {
     
     func selectOutBoundModeWithMenory() {
         ApiRequest.updateOutBoundMode(mode: ConfigManager.selectOutBoundMode){
-            _ in
-            self.syncConfig()
+            [weak self] _ in
+            self?.syncConfig()
         }
     }
     
     func selectAllowLanWithMenory() {
         ApiRequest.updateAllowLan(allow: ConfigManager.allowConnectFromLan){
-            self.syncConfig()
+            [weak self] in
+            self?.syncConfig()
         }
     }
 }

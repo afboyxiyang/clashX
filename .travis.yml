@@ -1,5 +1,5 @@
 language: objective-c
-osx_image: xcode10.1
+osx_image: xcode10.2
 node_js: 10
 before_install:
 - openssl aes-256-cbc -K $encrypted_a43c9d4ca4d4_key -iv $encrypted_a43c9d4ca4d4_iv
@@ -18,6 +18,7 @@ install:
 - cd ClashX/Resources
 - git clone -b gh-pages https://github.com/Dreamacro/clash-dashboard.git dashboard
 - cd ..
+- echo `go version`
 - go build -buildmode=c-archive
 - cd $TRAVIS_BUILD_DIR
 script:
@@ -26,7 +27,7 @@ script:
 
 before_deploy:
 - gem install gym
-- fastlane gym -s ClashX --disable_xcpretty
+- fastlane gym -s ClashX
 - npm install --global create-dmg
 - create-dmg ClashX.app
 - mv ClashX*.dmg ClashX.dmg
@@ -45,3 +46,7 @@ deploy:
     repo: yichengchen/clashX
     branch: master
     tags: true
+
+after_deploy:
+- 'curl -u yichengchen:$GitHub_Token -X POST https://api.github.com/repos/yichengchen/clashX/pages/builds -H "Accept: application/vnd.github.mister-fantastic-preview+json"'
+- fastlane run upload_symbols_to_crashlytics
